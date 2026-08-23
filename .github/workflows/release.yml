@@ -1,0 +1,71 @@
+name: release
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24.x"
+          cache: true
+      - name: Test
+        run: go test ./...
+      - name: Vet
+        run: go vet ./...
+      - name: Scan tracked files for secrets
+        shell: pwsh
+        run: |
+          $patterns = @(
+            'sk-or-v1-[A-Za-z0-9_-]{40,}',
+            'sk-[A-Za-z0-9_-]{40,}',
+            'awsapps\.com/start',
+            'refresh[_-]?token\s*[=:]'
+          )
+          $matches = git grep -n -I -E ($patterns -join '|') -- . ':!go.sum'
+          if ($LASTEXITCODE -eq 0) {
+            $matches
+            throw 'Potential secret found in tracked files.'
+          }
+          if ($LASTEXITCODE -ne 1) {
+            throw "git grep failed with exit code $LASTEXITCODE"
+          }
+      - name: Build Windows plugin
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          $env:GOOS = 'windows'
+          $env:GOARCH = 'amd64'
+          $env:CGO_ENABLED = '1'
+          go build -trimpath -buildmode=c-shared -o dist/openrouter.dll ./cmd/openrouter-plugin
+          $hash = (Get-FileHash -Algorithm SHA256 dist/openrouter.dll).Hash.ToLowerInvariant()
+          "$hash  openrouter.dll" | Set-Content -NoNewline -Encoding ascii dist/openrouter.dll.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: openrouter-windows-amd64
+          path: |
+            dist/openrouter.dll
+            dist/openrouter.h
+            dist/openrouter.dll.sha256
+          if-no-files-found: error
+      - name: Publish GitHub release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/openrouter.dll
+            dist/openrouter.h
+            dist/openrouter.dll.sha256
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

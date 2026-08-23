@@ -1,0 +1,9 @@
+/dist/
+*.dll
+*.h
+*.sha256
+*.test
+*.out
+.idea/
+.vscode/
+
