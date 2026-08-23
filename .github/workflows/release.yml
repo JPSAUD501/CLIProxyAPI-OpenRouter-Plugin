@@ -14,8 +14,8 @@ jobs:
   windows:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version: "1.24.x"
           cache: true
@@ -32,13 +32,13 @@ jobs:
             'awsapps\.com/start',
             'refresh[_-]?token\s*[=:]'
           )
-          $matches = git grep -n -I -E ($patterns -join '|') -- . ':!go.sum'
-          if ($LASTEXITCODE -eq 0) {
-            $matches
-            throw 'Potential secret found in tracked files.'
+          $trackedFiles = git ls-files | Where-Object { $_ -ne 'go.sum' }
+          $findings = foreach ($file in $trackedFiles) {
+            Select-String -LiteralPath $file -Pattern $patterns
           }
-          if ($LASTEXITCODE -ne 1) {
-            throw "git grep failed with exit code $LASTEXITCODE"
+          if ($findings) {
+            $findings | ForEach-Object { "{0}:{1}" -f $_.Path, $_.LineNumber }
+            throw 'Potential secret found in tracked files.'
           }
       - name: Build Windows plugin
         shell: pwsh
@@ -50,7 +50,7 @@ jobs:
           go build -trimpath -buildmode=c-shared -o dist/openrouter.dll ./cmd/openrouter-plugin
           $hash = (Get-FileHash -Algorithm SHA256 dist/openrouter.dll).Hash.ToLowerInvariant()
           "$hash  openrouter.dll" | Set-Content -NoNewline -Encoding ascii dist/openrouter.dll.sha256
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: openrouter-windows-amd64
           path: |
