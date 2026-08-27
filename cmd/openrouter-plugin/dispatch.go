@@ -11,7 +11,7 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v7/sdk/pluginapi"
 )
 
-const pluginVersion = "0.2.1"
+const pluginVersion = "0.2.2"
 
 var pluginService = openrouter.New(hostTransport{})
 

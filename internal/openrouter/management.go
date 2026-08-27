@@ -36,10 +36,6 @@ type modelCapabilitiesResponse struct {
 	Models            []modelCapability `json:"models"`
 }
 
-var suffixEffortOrder = map[string]int{
-	"none": 0, "minimal": 1, "low": 2, "medium": 3, "high": 4, "xhigh": 5, "max": 6,
-}
-
 func (s *Service) modelCapabilities() (pluginapi.ManagementResponse, error) {
 	s.mu.Lock()
 	caches := make([]catalogCache, 0, len(s.cache))

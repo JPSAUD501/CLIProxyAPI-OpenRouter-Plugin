@@ -89,15 +89,20 @@ func (s *Service) prepareExecution(ctx context.Context, req ExecuteRequest) (aut
 	if err != nil {
 		return authStorage{}, "", "", nil, err
 	}
-	_, aliases, err := s.catalog(ctx, req.HostCallbackID, req.AuthID, storage, false)
+	models, aliases, err := s.catalog(ctx, req.HostCallbackID, req.AuthID, storage, false)
 	if err != nil {
 		apiKey = ""
 		return authStorage{}, "", "", nil, err
 	}
-	native := aliases[strings.ToLower(strings.TrimSpace(req.Model))]
+	modelID, effort, hasEffort := splitEffortSuffix(req.Model)
+	native := aliases[strings.ToLower(modelID)]
 	if native == "" {
 		apiKey = ""
 		return authStorage{}, "", "", nil, statusError("model_not_found", "OpenRouter model is not available for the selected credential", 404, false)
+	}
+	if hasEffort && !modelSupportsEffort(models, modelID, effort) {
+		apiKey = ""
+		return authStorage{}, "", "", nil, statusError("effort_not_supported", "OpenRouter reasoning effort is not supported for the selected model", 422, false)
 	}
 	body := req.Payload
 	if len(body) == 0 {
@@ -107,6 +112,13 @@ func (s *Service) prepareExecution(ctx context.Context, req ExecuteRequest) (aut
 	if err != nil {
 		apiKey = ""
 		return authStorage{}, "", "", nil, err
+	}
+	if hasEffort {
+		body, err = rewriteRequestEffort(body, effort)
+		if err != nil {
+			apiKey = ""
+			return authStorage{}, "", "", nil, err
+		}
 	}
 	return storage, apiKey, native, body, nil
 }

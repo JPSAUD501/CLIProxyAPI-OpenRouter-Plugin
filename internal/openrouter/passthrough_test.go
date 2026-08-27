@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/router-for-me/CLIProxyAPI/v7/sdk/pluginapi"
+	"github.com/tidwall/gjson"
 )
 
 type mockHost struct {
@@ -113,6 +114,73 @@ func TestExecuteChangesOnlyModelAcrossNativeProtocols(t *testing.T) {
 				t.Fatalf("response model = %#v", responseBody["model"])
 			}
 		})
+	}
+}
+
+func TestExecuteAppliesSupportedEffortSuffixAcrossNativeProtocols(t *testing.T) {
+	storage, err := newStorage("test-key-not-a-secret", "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rawStorage, _ := json.Marshal(storage)
+	original := []byte(`{"model":"reasoning-model(high)","messages":[{"role":"user","content":"hello"}],"custom":{"keep":true}}`)
+
+	for _, format := range []string{"openai", "openai-response", "claude"} {
+		t.Run(format, func(t *testing.T) {
+			var captured Request
+			host := &mockHost{do: func(_ context.Context, _ string, req Request) (Response, error) {
+				if req.URL == apiBaseURL+"/models/user" {
+					body, _ := json.Marshal(modelsResponse{Data: []upstreamModel{{
+						ID: "vendor/reasoning-model", Architecture: modelArchitecture{OutputModalities: []string{"text"}},
+						Reasoning: reasoningInfo{SupportedEfforts: []string{"low", "high"}},
+					}}})
+					return Response{StatusCode: http.StatusOK, Body: body}, nil
+				}
+				captured = req
+				return Response{StatusCode: http.StatusOK, Body: []byte(`{"model":"vendor/reasoning-model","content":[]}`)}, nil
+			}}
+			_, errExecute := New(host).Execute(context.Background(), ExecuteRequest{ExecutorRequest: pluginapi.ExecutorRequest{
+				AuthID: "auth", Model: "reasoning-model(high)", SourceFormat: format, Payload: original, StorageJSON: rawStorage,
+			}})
+			if errExecute != nil {
+				t.Fatal(errExecute)
+			}
+			if got := gjson.GetBytes(captured.Body, "model").String(); got != "vendor/reasoning-model" {
+				t.Fatalf("upstream model = %q", got)
+			}
+			if got := gjson.GetBytes(captured.Body, "reasoning.effort").String(); got != "high" {
+				t.Fatalf("upstream reasoning effort = %q", got)
+			}
+			if !gjson.GetBytes(captured.Body, "custom.keep").Bool() {
+				t.Fatalf("unrelated request content changed: %s", captured.Body)
+			}
+		})
+	}
+}
+
+func TestExecuteRejectsUnadvertisedEffortSuffix(t *testing.T) {
+	storage, err := newStorage("test-key-not-a-secret", "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rawStorage, _ := json.Marshal(storage)
+	host := &mockHost{do: func(_ context.Context, _ string, req Request) (Response, error) {
+		if req.URL != apiBaseURL+"/models/user" {
+			return Response{}, errors.New("unexpected inference request")
+		}
+		body, _ := json.Marshal(modelsResponse{Data: []upstreamModel{{
+			ID: "vendor/reasoning-model", Architecture: modelArchitecture{OutputModalities: []string{"text"}},
+			Reasoning: reasoningInfo{SupportedEfforts: []string{"low"}},
+		}}})
+		return Response{StatusCode: http.StatusOK, Body: body}, nil
+	}}
+	_, err = New(host).Execute(context.Background(), ExecuteRequest{ExecutorRequest: pluginapi.ExecutorRequest{
+		AuthID: "auth", Model: "reasoning-model(high)", SourceFormat: "claude",
+		Payload: []byte(`{"model":"reasoning-model(high)","messages":[]}`), StorageJSON: rawStorage,
+	}})
+	var statusErr *StatusError
+	if !errors.As(err, &statusErr) || statusErr.Code != "effort_not_supported" || statusErr.HTTPStatus != http.StatusUnprocessableEntity {
+		t.Fatalf("execute error = %#v", err)
 	}
 }
 
