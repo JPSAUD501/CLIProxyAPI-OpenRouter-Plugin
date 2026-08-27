@@ -56,6 +56,8 @@ The executor maps the selected short alias back to its native OpenRouter slug an
 - `openai-response` → `POST /api/v1/responses`
 - `claude` → `POST /api/v1/messages`
 
+Reasoning suffixes advertised by the capability endpoint, such as `model(high)`, are validated against the authenticated catalog. The executor removes the suffix from the model alias and sends it to OpenRouter as `reasoning.effort`.
+
 Request content is not truncated, synthesized, or normalized. System and developer instructions, history, tools, tool results, reasoning, multimodal content, provider preferences, and OpenRouter-specific parameters remain in the original protocol. JSON and SSE responses remain in that same protocol; only native model slugs are changed back to their public aliases.
 
 The plugin does not add retries, simulate unsupported endpoints, count tokens locally, or implement `/responses/compact`. Failover and cooldown remain CLIProxyAPI responsibilities, while provider routing remains an OpenRouter request option.

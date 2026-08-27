@@ -92,6 +92,14 @@ func rewriteRequestModel(body []byte, native string) ([]byte, error) {
 	return rewritten, nil
 }
 
+func rewriteRequestEffort(body []byte, effort string) ([]byte, error) {
+	rewritten, err := sjson.SetBytes(body, "reasoning.effort", effort)
+	if err != nil {
+		return nil, statusError("invalid_request", "request reasoning effort could not be applied", 400, false)
+	}
+	return rewritten, nil
+}
+
 func rewriteResponseModels(body []byte) ([]byte, bool) {
 	if !gjson.ValidBytes(body) || !gjson.ParseBytes(body).IsObject() {
 		return body, false
