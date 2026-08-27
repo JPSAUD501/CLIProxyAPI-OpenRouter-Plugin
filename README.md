@@ -46,6 +46,8 @@ The catalog comes from OpenRouter's authenticated `GET /api/v1/models/user` resp
 
 The plugin keeps the last valid in-memory catalog for transient network errors, HTTP 429, and HTTP 5xx. An authorization failure affects only the corresponding credential.
 
+The authenticated Management API exposes the suffix-compatible reasoning levels from that same normalized catalog at `GET /v0/management/plugins/openrouter/model-capabilities`. The response contains only model aliases and effort levels. It does not expose API keys, credential storage, account labels, or request data.
+
 ## Protocol behavior
 
 The executor maps the selected short alias back to its native OpenRouter slug and forwards the request to the matching native endpoint:
