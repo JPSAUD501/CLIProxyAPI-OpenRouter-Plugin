@@ -2,8 +2,10 @@ package openrouter
 
 import (
 	"context"
+	"encoding/json"
 	"html"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -12,6 +14,8 @@ import (
 
 func (s *Service) Management(callbackID string, req pluginapi.ManagementRequest) (pluginapi.ManagementResponse, error) {
 	switch req.Path {
+	case "/v0/management/plugins/openrouter/model-capabilities":
+		return s.modelCapabilities()
 	case "/v0/resource/plugins/openrouter/login":
 		return s.loginPage(req)
 	case "/v0/resource/plugins/openrouter/connect":
@@ -19,6 +23,92 @@ func (s *Service) Management(callbackID string, req pluginapi.ManagementRequest)
 	default:
 		return pluginapi.ManagementResponse{StatusCode: http.StatusNotFound, Headers: textHeaders(), Body: []byte("Not found")}, nil
 	}
+}
+
+type modelCapability struct {
+	ModelID      string   `json:"model_id"`
+	EffortLevels []string `json:"effort_levels"`
+}
+
+type modelCapabilitiesResponse struct {
+	Provider          string            `json:"provider"`
+	CatalogModelCount int               `json:"catalog_model_count"`
+	Models            []modelCapability `json:"models"`
+}
+
+var suffixEffortOrder = map[string]int{
+	"none": 0, "minimal": 1, "low": 2, "medium": 3, "high": 4, "xhigh": 5, "max": 6,
+}
+
+func (s *Service) modelCapabilities() (pluginapi.ManagementResponse, error) {
+	s.mu.Lock()
+	caches := make([]catalogCache, 0, len(s.cache))
+	for _, cached := range s.cache {
+		caches = append(caches, cached)
+	}
+	s.mu.Unlock()
+
+	catalogModels := make(map[string]struct{})
+	type capabilitySet struct {
+		modelID string
+		levels  map[string]struct{}
+	}
+	capabilities := make(map[string]*capabilitySet)
+	for _, cached := range caches {
+		for _, model := range cached.Models {
+			modelID := strings.TrimSpace(model.ID)
+			if modelID == "" {
+				continue
+			}
+			key := strings.ToLower(modelID)
+			catalogModels[key] = struct{}{}
+			if model.Thinking == nil {
+				continue
+			}
+			for _, rawLevel := range model.Thinking.Levels {
+				level := strings.ToLower(strings.TrimSpace(rawLevel))
+				if _, supported := suffixEffortOrder[level]; !supported {
+					continue
+				}
+				capability := capabilities[key]
+				if capability == nil {
+					capability = &capabilitySet{modelID: modelID, levels: make(map[string]struct{})}
+					capabilities[key] = capability
+				}
+				capability.levels[level] = struct{}{}
+			}
+		}
+	}
+
+	if len(catalogModels) == 0 {
+		return jsonManagementResponse(http.StatusServiceUnavailable, map[string]string{"error": "openrouter_catalog_unavailable"})
+	}
+
+	models := make([]modelCapability, 0, len(capabilities))
+	for _, capability := range capabilities {
+		levels := make([]string, 0, len(capability.levels))
+		for level := range capability.levels {
+			levels = append(levels, level)
+		}
+		sort.Slice(levels, func(i, j int) bool { return suffixEffortOrder[levels[i]] < suffixEffortOrder[levels[j]] })
+		models = append(models, modelCapability{ModelID: capability.modelID, EffortLevels: levels})
+	}
+	sort.Slice(models, func(i, j int) bool { return strings.ToLower(models[i].ModelID) < strings.ToLower(models[j].ModelID) })
+
+	return jsonManagementResponse(http.StatusOK, modelCapabilitiesResponse{
+		Provider: providerID, CatalogModelCount: len(catalogModels), Models: models,
+	})
+}
+
+func jsonManagementResponse(status int, value any) (pluginapi.ManagementResponse, error) {
+	body, err := json.Marshal(value)
+	if err != nil {
+		return pluginapi.ManagementResponse{}, err
+	}
+	return pluginapi.ManagementResponse{StatusCode: status, Headers: http.Header{
+		"Cache-Control": []string{"no-store"},
+		"Content-Type":  []string{"application/json; charset=utf-8"},
+	}, Body: body}, nil
 }
 
 func (s *Service) loginPage(req pluginapi.ManagementRequest) (pluginapi.ManagementResponse, error) {

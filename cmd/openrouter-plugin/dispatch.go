@@ -11,7 +11,7 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v7/sdk/pluginapi"
 )
 
-const pluginVersion = "0.2.0"
+const pluginVersion = "0.2.1"
 
 var pluginService = openrouter.New(hostTransport{})
 
@@ -158,7 +158,10 @@ func dispatch(method string, request []byte) (any, error) {
 		}
 		return pluginService.HTTP(ctx, req)
 	case pluginabi.MethodManagementRegister:
-		return managementRegistrationResponse{Resources: []pluginapi.ResourceRoute{{Path: "/login"}, {Path: "/connect"}}}, nil
+		return managementRegistrationResponse{
+			Routes:    []pluginapi.ManagementRoute{{Method: http.MethodGet, Path: "/plugins/openrouter/model-capabilities"}},
+			Resources: []pluginapi.ResourceRoute{{Path: "/login"}, {Path: "/connect"}},
+		}, nil
 	case pluginabi.MethodManagementHandle:
 		var req rpcManagementRequest
 		if err := json.Unmarshal(request, &req); err != nil {
