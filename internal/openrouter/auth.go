@@ -156,14 +156,20 @@ func (s *Service) validateKey(ctx context.Context, callbackID, apiKey string) (s
 func authData(storage authStorage) pluginapi.AuthData {
 	raw, _ := json.Marshal(storage)
 	id := "openrouter-" + storage.KeyHash[:12]
+	metadata := map[string]any{"type": providerID, "priority": -1}
+	attributes := map[string]string{"auth_kind": "api_key", "priority": "-1"}
+	if note := strings.TrimSpace(storage.Note); note != "" {
+		metadata["note"] = note
+		attributes["note"] = note
+	}
 	return pluginapi.AuthData{
 		Provider:         providerID,
 		ID:               id,
 		FileName:         id + ".json",
 		Label:            "OpenRouter - " + normalizeLabel(storage.Label),
 		StorageJSON:      raw,
-		Metadata:         map[string]any{"type": providerID, "priority": -1},
-		Attributes:       map[string]string{"auth_kind": "api_key", "priority": "-1"},
+		Metadata:         metadata,
+		Attributes:       attributes,
 		NextRefreshAfter: time.Now().UTC().Add(cacheTTL),
 	}
 }

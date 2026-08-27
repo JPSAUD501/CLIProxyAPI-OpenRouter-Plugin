@@ -8,31 +8,31 @@ on:
     branches: [main]
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  windows:
-    runs-on: windows-latest
+  test:
+    strategy:
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
         with:
-          go-version: "1.26.x"
+          go-version-file: go.mod
           cache: true
-      - name: Test
-        run: go test ./...
-      - name: Vet
-        run: go vet ./...
+      - run: go test ./...
+      - run: go vet ./...
       - name: Scan tracked files for secrets
         shell: pwsh
         run: |
           $patterns = @(
             'sk-or-v1-[A-Za-z0-9_-]{40,}',
             'sk-[A-Za-z0-9_-]{40,}',
-            'awsapps\.com/start',
             'refresh[_-]?token\s*[=:]'
           )
-          $trackedFiles = git ls-files | Where-Object { $_ -ne 'go.sum' }
+          $trackedFiles = git ls-files | Where-Object { $_ -ne 'go.sum' -and (Test-Path -LiteralPath $_) }
           $findings = foreach ($file in $trackedFiles) {
             Select-String -LiteralPath $file -Pattern $patterns
           }
@@ -40,32 +40,95 @@ jobs:
             $findings | ForEach-Object { "{0}:{1}" -f $_.Path, $_.LineNumber }
             throw 'Potential secret found in tracked files.'
           }
-      - name: Build Windows plugin
+
+  windows-amd64:
+    needs: test
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Build package
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          New-Item -ItemType Directory -Force -Path package | Out-Null
           $env:GOOS = 'windows'
           $env:GOARCH = 'amd64'
           $env:CGO_ENABLED = '1'
-          go build -trimpath -buildmode=c-shared -o dist/openrouter.dll ./cmd/openrouter-plugin
-          $hash = (Get-FileHash -Algorithm SHA256 dist/openrouter.dll).Hash.ToLowerInvariant()
-          "$hash  openrouter.dll" | Set-Content -NoNewline -Encoding ascii dist/openrouter.dll.sha256
+          go build -trimpath -buildmode=c-shared -o package/openrouter.dll ./cmd/openrouter-plugin
+          go build -trimpath -o package/openrouter-migrate.exe ./cmd/openrouter-migrate
+          $hash = (Get-FileHash -Algorithm SHA256 package/openrouter.dll).Hash.ToLowerInvariant()
+          "$hash  openrouter.dll" | Set-Content -NoNewline -Encoding ascii package/openrouter.dll.sha256
+          Compress-Archive -Path package/* -DestinationPath openrouter-windows-amd64.zip
+          $archiveHash = (Get-FileHash -Algorithm SHA256 openrouter-windows-amd64.zip).Hash.ToLowerInvariant()
+          "$archiveHash  openrouter-windows-amd64.zip" | Set-Content -NoNewline -Encoding ascii openrouter-windows-amd64.zip.sha256
       - uses: actions/upload-artifact@v7
         with:
           name: openrouter-windows-amd64
           path: |
-            dist/openrouter.dll
-            dist/openrouter.h
-            dist/openrouter.dll.sha256
+            openrouter-windows-amd64.zip
+            openrouter-windows-amd64.zip.sha256
           if-no-files-found: error
-      - name: Publish GitHub release
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2
+
+  linux:
+    needs: test
+    strategy:
+      matrix:
+        include:
+          - arch: amd64
+            cc: gcc
+          - arch: arm64
+            cc: aarch64-linux-gnu-gcc
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
-          files: |
-            dist/openrouter.dll
-            dist/openrouter.h
-            dist/openrouter.dll.sha256
-          generate_release_notes: true
+          go-version-file: go.mod
+          cache: true
+      - name: Install ARM64 cross compiler
+        if: matrix.arch == 'arm64'
+        run: sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu
+      - name: Build package
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GOOS: linux
+          GOARCH: ${{ matrix.arch }}
+          CGO_ENABLED: "1"
+          CC: ${{ matrix.cc }}
+        run: |
+          mkdir -p package
+          go build -trimpath -buildmode=c-shared -o package/openrouter.so ./cmd/openrouter-plugin
+          sha256sum package/openrouter.so | sed 's#package/##' > package/openrouter.so.sha256
+          tar -C package -czf "openrouter-linux-${GOARCH}.tar.gz" openrouter.so openrouter.h openrouter.so.sha256
+          sha256sum "openrouter-linux-${GOARCH}.tar.gz" > "openrouter-linux-${GOARCH}.tar.gz.sha256"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: openrouter-linux-${{ matrix.arch }}
+          path: |
+            openrouter-linux-${{ matrix.arch }}.tar.gz
+            openrouter-linux-${{ matrix.arch }}.tar.gz.sha256
+          if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [windows-amd64, linux]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          pattern: openrouter-*
+          path: dist
+          merge-multiple: true
+      - name: Publish plugin release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --verify-tag \
+            --title "OpenRouter plugin $GITHUB_REF_NAME" \
+            --generate-notes

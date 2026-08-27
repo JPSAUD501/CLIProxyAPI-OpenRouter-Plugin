@@ -1,5 +1,7 @@
 /dist/
 *.dll
+*.so
+*.exe
 *.h
 *.sha256
 *.test

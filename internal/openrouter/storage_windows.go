@@ -12,7 +12,7 @@ import (
 
 const cryptProtectUIForbidden = 0x1
 
-func protectSecret(plain []byte) (string, error) {
+func protectLegacySecret(plain []byte) (string, error) {
 	if len(plain) == 0 {
 		return "", fmt.Errorf("secret is empty")
 	}
@@ -26,7 +26,7 @@ func protectSecret(plain []byte) (string, error) {
 	return base64.RawStdEncoding.EncodeToString(protected), nil
 }
 
-func unprotectSecret(encoded string) ([]byte, error) {
+func unprotectLegacySecret(encoded string) ([]byte, error) {
 	protected, err := base64.RawStdEncoding.DecodeString(encoded)
 	if err != nil || len(protected) == 0 {
 		return nil, fmt.Errorf("decode protected secret: %w", err)
