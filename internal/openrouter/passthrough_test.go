@@ -234,6 +234,56 @@ func TestExecuteStreamPreservesChunkBoundariesAndText(t *testing.T) {
 	}
 }
 
+func TestExecuteOpenAIStreamEmitsPayloadsWithoutNestedSSEFraming(t *testing.T) {
+	storage, err := newStorage("stream-key", "stream")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rawStorage, _ := json.Marshal(storage)
+	closed := make(chan struct{})
+	host := &mockHost{closed: closed}
+	host.do = func(_ context.Context, _ string, req Request) (Response, error) {
+		if req.URL == apiBaseURL+"/models/user" {
+			return modelCatalogResponse("z-ai/glm-5.3-flash"), nil
+		}
+		return Response{}, errors.New("unexpected request")
+	}
+	host.open = func(_ context.Context, _ string, _ Request) (Stream, error) {
+		return Stream{StatusCode: http.StatusOK, ID: "upstream", Headers: http.Header{"Content-Type": []string{"text/event-stream"}}}, nil
+	}
+	host.chunks = []StreamChunk{
+		{Payload: []byte(": OPENROUTER PROCESSING\n\n")},
+		{Payload: []byte("data: {\"id\":\"chunk\",\"model\":\"z-ai/glm-5.3-flash\",\"choices\":[]}")},
+		{Payload: []byte("\n\ndata: [DONE]\n\n"), Done: true},
+	}
+
+	service := New(host)
+	_, err = service.ExecuteStream(context.Background(), ExecuteRequest{ExecutorRequest: pluginapi.ExecutorRequest{
+		AuthID: "auth", Model: "glm-5.3-flash", SourceFormat: "openai", StorageJSON: rawStorage,
+		Payload: []byte(`{"model":"glm-5.3-flash","messages":[{"role":"user","content":"hello"}],"stream":true}`),
+	}, StreamID: "output"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-closed:
+	case <-time.After(2 * time.Second):
+		t.Fatal("stream pump did not finish")
+	}
+
+	host.mu.Lock()
+	emitted := host.emitted.String()
+	outputError := host.outputError
+	host.mu.Unlock()
+	if outputError != "" {
+		t.Fatalf("stream closed with error: %s", outputError)
+	}
+	want := `{"id":"chunk","model":"glm-5.3-flash","choices":[]}`
+	if emitted != want {
+		t.Fatalf("emitted payload = %q, want %q", emitted, want)
+	}
+}
+
 func TestRequestModelRewritePreservesLongHistory(t *testing.T) {
 	messages := make([]map[string]any, 200)
 	for i := range messages {

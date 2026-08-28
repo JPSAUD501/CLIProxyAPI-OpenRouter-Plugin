@@ -81,6 +81,41 @@ func rewriteSSEFrame(frame []byte) []byte {
 	return []byte(strings.Join(lines, separator) + ending)
 }
 
+// openAIStreamPayload returns the data payload expected by CLIProxyAPI's
+// OpenAI chat-completions handler. The host owns the downstream SSE framing,
+// so forwarding OpenRouter's complete SSE frame would produce
+// "data: data: {...}" and turn comment heartbeats into invalid JSON chunks.
+func openAIStreamPayload(frame []byte) ([]byte, bool) {
+	separator := "\n"
+	if bytes.Contains(frame, []byte("\r\n")) {
+		separator = "\r\n"
+	}
+	body := string(frame)
+	body = strings.TrimSuffix(body, separator+separator)
+	dataLines := make([]string, 0, 1)
+	for _, line := range strings.Split(body, separator) {
+		if !strings.HasPrefix(line, "data:") {
+			continue
+		}
+		value := strings.TrimPrefix(line, "data:")
+		if strings.HasPrefix(value, " ") {
+			value = strings.TrimPrefix(value, " ")
+		}
+		dataLines = append(dataLines, value)
+	}
+	if len(dataLines) == 0 {
+		return nil, false
+	}
+	payload := []byte(strings.Join(dataLines, "\n"))
+	if len(bytes.TrimSpace(payload)) == 0 || bytes.Equal(bytes.TrimSpace(payload), []byte("[DONE]")) {
+		return nil, false
+	}
+	if rewritten, ok := rewriteResponseModels(payload); ok {
+		payload = rewritten
+	}
+	return payload, true
+}
+
 func rewriteRequestModel(body []byte, native string) ([]byte, error) {
 	if !gjson.ValidBytes(body) || !gjson.ParseBytes(body).IsObject() {
 		return nil, statusError("invalid_request", "request body must be a JSON object", 400, false)

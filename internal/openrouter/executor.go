@@ -50,7 +50,8 @@ func (s *Service) ExecuteStream(ctx context.Context, req ExecuteRequest) (http.H
 	if strings.TrimSpace(req.StreamID) == "" {
 		return nil, statusError("invalid_request", "stream_id is required", 400, false)
 	}
-	endpoint, err := endpointForFormat(firstNonEmpty(req.SourceFormat, req.Format))
+	format := firstNonEmpty(req.SourceFormat, req.Format)
+	endpoint, err := endpointForFormat(format)
 	if err != nil {
 		return nil, err
 	}
@@ -73,7 +74,7 @@ func (s *Service) ExecuteStream(ctx context.Context, req ExecuteRequest) (http.H
 		}
 		return nil, upstreamError(upstream.StatusCode, body)
 	}
-	go s.pumpStream(req.StreamID, upstream)
+	go s.pumpStream(req.StreamID, upstream, format)
 	headers := filterResponseHeaders(upstream.Headers)
 	headers.Set("Content-Type", "text/event-stream")
 	headers.Set("Cache-Control", "no-cache")
@@ -167,7 +168,7 @@ func (s *Service) collectStreamError(ctx context.Context, stream Stream) ([]byte
 	}
 }
 
-func (s *Service) pumpStream(outputID string, upstream Stream) {
+func (s *Service) pumpStream(outputID string, upstream Stream, format string) {
 	ctx := context.Background()
 	var terminalErr error
 	defer func() {
@@ -190,19 +191,38 @@ func (s *Service) pumpStream(outputID string, upstream Stream) {
 			return
 		}
 		for _, frame := range decoder.Feed(chunk.Payload) {
-			if err := s.host.Emit(ctx, outputID, rewriteSSEFrame(frame)); err != nil {
+			payload, emit := outputStreamPayload(frame, format)
+			if !emit {
+				continue
+			}
+			if err := s.host.Emit(ctx, outputID, payload); err != nil {
 				terminalErr = err
 				return
 			}
 		}
 		if chunk.Done {
 			if trailing := decoder.Flush(); len(trailing) > 0 {
-				if err := s.host.Emit(ctx, outputID, rewriteSSEFrame(trailing)); err != nil {
-					terminalErr = err
+				payload, emit := outputStreamPayload(trailing, format)
+				if emit {
+					if err := s.host.Emit(ctx, outputID, payload); err != nil {
+						terminalErr = err
+					}
+				}
+				if terminalErr != nil {
+					return
 				}
 			}
 			return
 		}
+	}
+}
+
+func outputStreamPayload(frame []byte, format string) ([]byte, bool) {
+	switch strings.ToLower(strings.TrimSpace(format)) {
+	case "openai", "chat-completions":
+		return openAIStreamPayload(frame)
+	default:
+		return rewriteSSEFrame(frame), true
 	}
 }
 
