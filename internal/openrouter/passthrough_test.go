@@ -158,6 +158,47 @@ func TestExecuteAppliesSupportedEffortSuffixAcrossNativeProtocols(t *testing.T) 
 	}
 }
 
+func TestExecuteRoutesNitroEffortAcrossNativeProtocols(t *testing.T) {
+	storage, err := newStorage("test-key-not-a-secret", "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rawStorage, _ := json.Marshal(storage)
+	original := []byte(`{"model":"reasoning-model:nitro(high)","messages":[{"role":"user","content":"hello"}],"tools":[{"type":"function","function":{"name":"lookup"}}]}`)
+
+	for _, format := range []string{"openai", "openai-response", "claude"} {
+		t.Run(format, func(t *testing.T) {
+			var captured Request
+			host := &mockHost{do: func(_ context.Context, _ string, req Request) (Response, error) {
+				if req.URL == apiBaseURL+"/models/user" {
+					body, _ := json.Marshal(modelsResponse{Data: []upstreamModel{{
+						ID: "vendor/reasoning-model", Architecture: modelArchitecture{OutputModalities: []string{"text"}},
+						Reasoning: reasoningInfo{SupportedEfforts: []string{"low", "high"}},
+					}}})
+					return Response{StatusCode: http.StatusOK, Body: body}, nil
+				}
+				captured = req
+				return Response{StatusCode: http.StatusOK, Body: []byte(`{"model":"vendor/reasoning-model","content":[]}`)}, nil
+			}}
+			_, executeErr := New(host).Execute(context.Background(), ExecuteRequest{ExecutorRequest: pluginapi.ExecutorRequest{
+				AuthID: "auth", Model: "reasoning-model:nitro(high)", SourceFormat: format, Payload: original, StorageJSON: rawStorage,
+			}})
+			if executeErr != nil {
+				t.Fatal(executeErr)
+			}
+			if got := gjson.GetBytes(captured.Body, "model").String(); got != "vendor/reasoning-model:nitro" {
+				t.Fatalf("upstream Nitro model = %q", got)
+			}
+			if got := gjson.GetBytes(captured.Body, "reasoning.effort").String(); got != "high" {
+				t.Fatalf("upstream reasoning effort = %q", got)
+			}
+			if gjson.GetBytes(captured.Body, "tools.0.function.name").String() != "lookup" {
+				t.Fatalf("tool definition was not preserved: %s", captured.Body)
+			}
+		})
+	}
+}
+
 func TestExecuteRejectsUnadvertisedEffortSuffix(t *testing.T) {
 	storage, err := newStorage("test-key-not-a-secret", "test")
 	if err != nil {

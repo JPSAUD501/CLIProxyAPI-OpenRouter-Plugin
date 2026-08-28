@@ -37,6 +37,7 @@ func TestModelCapabilitiesReturnsAuthenticatedCatalogEfforts(t *testing.T) {
 	service := New(nil)
 	service.cache["first"] = catalogCache{Models: []pluginapi.ModelInfo{
 		{ID: "reasoning-model", Thinking: &pluginapi.ThinkingSupport{Levels: []string{"high", "low", "future"}}},
+		{ID: "reasoning-model:nitro", Thinking: &pluginapi.ThinkingSupport{Levels: []string{"high", "low", "future"}}},
 		{ID: "plain-model"},
 	}}
 	service.cache["second"] = catalogCache{Models: []pluginapi.ModelInfo{
@@ -56,12 +57,16 @@ func TestModelCapabilitiesReturnsAuthenticatedCatalogEfforts(t *testing.T) {
 	if err = json.Unmarshal(response.Body, &payload); err != nil {
 		t.Fatal(err)
 	}
-	if payload.Provider != providerID || payload.CatalogModelCount != 2 || len(payload.Models) != 1 {
+	if payload.Provider != providerID || payload.CatalogModelCount != 3 || len(payload.Models) != 2 {
 		t.Fatalf("unexpected payload: %#v", payload)
 	}
 	model := payload.Models[0]
 	if model.ModelID != "reasoning-model" || strings.Join(model.EffortLevels, ",") != "low,high,max" {
 		t.Fatalf("unexpected model capabilities: %#v", model)
+	}
+	nitro := payload.Models[1]
+	if nitro.ModelID != "reasoning-model:nitro" || strings.Join(nitro.EffortLevels, ",") != "low,high" {
+		t.Fatalf("unexpected Nitro capabilities: %#v", nitro)
 	}
 }
 
