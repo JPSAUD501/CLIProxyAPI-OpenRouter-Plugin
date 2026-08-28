@@ -19,14 +19,20 @@ func TestNormalizeModelsUsesShortVendorAliasesAndPreservesOpenRouterModels(t *te
 		{ID: "vendor/image-only", Architecture: modelArchitecture{OutputModalities: []string{"image"}}},
 	})
 
-	if len(models) != 2 {
-		t.Fatalf("got %d models, want 2", len(models))
+	if len(models) != 4 {
+		t.Fatalf("got %d models, want 4", len(models))
 	}
 	if got := aliases["claude-opus-5"]; got != "anthropic/claude-opus-5" {
 		t.Fatalf("short alias maps to %q", got)
 	}
 	if got := aliases["openrouter/auto"]; got != "openrouter/auto" {
 		t.Fatalf("virtual model maps to %q", got)
+	}
+	if got := aliases["claude-opus-5:nitro"]; got != "anthropic/claude-opus-5:nitro" {
+		t.Fatalf("Nitro alias maps to %q", got)
+	}
+	if got := aliases["openrouter/auto:nitro"]; got != "openrouter/auto:nitro" {
+		t.Fatalf("virtual Nitro model maps to %q", got)
 	}
 
 	var opusFound bool
@@ -55,11 +61,29 @@ func TestNormalizeModelsOmitsOnlyAmbiguousShortAlias(t *testing.T) {
 		{ID: "vendor-c/unique", Architecture: modelArchitecture{OutputModalities: []string{"text"}}},
 	})
 
-	if len(models) != 1 || models[0].ID != "unique" {
+	if len(models) != 2 || models[0].ID != "unique" || models[1].ID != "unique:nitro" {
 		t.Fatalf("unexpected normalized models: %#v", models)
 	}
 	if _, exists := aliases["shared"]; exists {
 		t.Fatal("ambiguous alias must not be registered")
+	}
+}
+
+func TestNormalizeModelsAppendsNitroToStaticVariants(t *testing.T) {
+	models, aliases := normalizeModels([]upstreamModel{{
+		ID: "z-ai/glm-5.2:free", Name: "GLM 5.2 Free",
+		Architecture: modelArchitecture{OutputModalities: []string{"text"}},
+		Reasoning:    reasoningInfo{SupportedEfforts: []string{"low", "high"}},
+	}})
+
+	if len(models) != 2 || models[0].ID != "glm-5.2:free" || models[1].ID != "glm-5.2:free:nitro" {
+		t.Fatalf("unexpected static variant models: %#v", models)
+	}
+	if got := aliases["glm-5.2:free:nitro"]; got != "z-ai/glm-5.2:free:nitro" {
+		t.Fatalf("stacked Nitro alias maps to %q", got)
+	}
+	if models[1].Thinking == nil || len(models[1].Thinking.Levels) != 2 {
+		t.Fatalf("Nitro reasoning metadata was not copied: %#v", models[1].Thinking)
 	}
 }
 

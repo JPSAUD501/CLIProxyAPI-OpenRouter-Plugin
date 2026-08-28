@@ -173,8 +173,8 @@ func normalizeModels(upstream []upstreamModel) ([]pluginapi.ModelInfo, map[strin
 		counts[key]++
 		candidates = append(candidates, candidate{model: model, alias: alias})
 	}
-	models := make([]pluginapi.ModelInfo, 0, len(candidates))
-	aliases := make(map[string]string, len(candidates))
+	models := make([]pluginapi.ModelInfo, 0, len(candidates)*2)
+	aliases := make(map[string]string, len(candidates)*2)
 	for _, item := range candidates {
 		if counts[strings.ToLower(item.alias)] != 1 {
 			continue
@@ -194,7 +194,7 @@ func normalizeModels(upstream []upstreamModel) ([]pluginapi.ModelInfo, map[strin
 				Levels:         levels,
 			}
 		}
-		models = append(models, pluginapi.ModelInfo{
+		base := pluginapi.ModelInfo{
 			ID:                         item.alias,
 			Object:                     "model",
 			Created:                    model.Created,
@@ -212,8 +212,19 @@ func normalizeModels(upstream []upstreamModel) ([]pluginapi.ModelInfo, map[strin
 			SupportedInputModalities:   uniqueStrings(model.Architecture.InputModalities),
 			SupportedOutputModalities:  uniqueStrings(model.Architecture.OutputModalities),
 			Thinking:                   thinking,
-		})
+		}
+		models = append(models, base)
 		aliases[strings.ToLower(item.alias)] = model.ID
+
+		nitro := cloneModel(base)
+		nitro.ID = item.alias + ":nitro"
+		nitro.Name = model.ID + ":nitro"
+		nitro.DisplayName = display + " (Nitro)"
+		if nitro.Version != "" {
+			nitro.Version += ":nitro"
+		}
+		models = append(models, nitro)
+		aliases[strings.ToLower(nitro.ID)] = nitro.Name
 	}
 	sort.Slice(models, func(i, j int) bool { return strings.ToLower(models[i].ID) < strings.ToLower(models[j].ID) })
 	return models, aliases
@@ -257,17 +268,22 @@ func containsFold(values []string, target string) bool {
 
 func cloneModels(in []pluginapi.ModelInfo) []pluginapi.ModelInfo {
 	out := make([]pluginapi.ModelInfo, len(in))
-	copy(out, in)
 	for i := range out {
-		out[i].SupportedGenerationMethods = append([]string(nil), in[i].SupportedGenerationMethods...)
-		out[i].SupportedParameters = append([]string(nil), in[i].SupportedParameters...)
-		out[i].SupportedInputModalities = append([]string(nil), in[i].SupportedInputModalities...)
-		out[i].SupportedOutputModalities = append([]string(nil), in[i].SupportedOutputModalities...)
-		if in[i].Thinking != nil {
-			copyThinking := *in[i].Thinking
-			copyThinking.Levels = append([]string(nil), in[i].Thinking.Levels...)
-			out[i].Thinking = &copyThinking
-		}
+		out[i] = cloneModel(in[i])
+	}
+	return out
+}
+
+func cloneModel(in pluginapi.ModelInfo) pluginapi.ModelInfo {
+	out := in
+	out.SupportedGenerationMethods = append([]string(nil), in.SupportedGenerationMethods...)
+	out.SupportedParameters = append([]string(nil), in.SupportedParameters...)
+	out.SupportedInputModalities = append([]string(nil), in.SupportedInputModalities...)
+	out.SupportedOutputModalities = append([]string(nil), in.SupportedOutputModalities...)
+	if in.Thinking != nil {
+		copyThinking := *in.Thinking
+		copyThinking.Levels = append([]string(nil), in.Thinking.Levels...)
+		out.Thinking = &copyThinking
 	}
 	return out
 }

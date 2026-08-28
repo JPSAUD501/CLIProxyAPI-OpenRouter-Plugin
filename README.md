@@ -43,6 +43,7 @@ The catalog comes from OpenRouter's authenticated `GET /api/v1/models/user` resp
 - Models without text output are not exposed in this version.
 - If two native slugs produce the same short alias, that ambiguous alias is omitted.
 - Context, output limit, modalities, parameters, and reasoning efforts are copied from the authenticated catalog when OpenRouter supplies them.
+- Every authenticated text model also has a `:nitro` entry. Static variants stack naturally, for example `glm-5.2:free:nitro`.
 
 The plugin keeps the last valid in-memory catalog for transient network errors, HTTP 429, and HTTP 5xx. An authorization failure affects only the corresponding credential.
 
@@ -57,6 +58,8 @@ The executor maps the selected short alias back to its native OpenRouter slug an
 - `claude` → `POST /api/v1/messages`
 
 Reasoning suffixes advertised by the capability endpoint, such as `model(high)`, are validated against the authenticated catalog. The executor removes the suffix from the model alias and sends it to OpenRouter as `reasoning.effort`.
+
+Nitro remains part of the model slug sent upstream. For example, `model:nitro(high)` becomes native `vendor/model:nitro` with `reasoning.effort=high`. This preserves OpenRouter's Nitro routing semantics, including throughput ordering and priority-tier eligibility.
 
 Request content is not truncated, synthesized, or normalized. System and developer instructions, history, tools, tool results, reasoning, multimodal content, provider preferences, and OpenRouter-specific parameters remain in the original protocol. JSON and SSE responses remain in that same protocol; only native model slugs are changed back to their public aliases.
 
