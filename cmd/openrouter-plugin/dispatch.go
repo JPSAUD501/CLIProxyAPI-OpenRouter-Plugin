@@ -11,7 +11,7 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v7/sdk/pluginapi"
 )
 
-const pluginVersion = "0.2.2"
+const pluginVersion = "0.2.5"
 
 var pluginService = openrouter.New(hostTransport{})
 
@@ -181,6 +181,11 @@ func pluginRegistration() registration {
 			Version:          pluginVersion,
 			Author:           "JPSAU501",
 			GitHubRepository: "https://github.com/JPSAUD501/CLIProxyAPI-OpenRouter-Plugin",
+			ConfigFields: []pluginapi.ConfigField{{
+				Name:        "public-base-url",
+				Type:        pluginapi.ConfigFieldTypeString,
+				Description: "Public HTTPS origin used for browser login pages when CLIProxyAPI runs behind a reverse proxy.",
+			}},
 		},
 		Capabilities: registrationCapabilities{
 			ModelProvider:         true,

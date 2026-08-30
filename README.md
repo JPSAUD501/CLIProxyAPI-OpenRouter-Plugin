@@ -32,6 +32,20 @@ plugins:
 5. Restart CLIProxyAPI.
 6. Open the OpenRouter authentication flow in the Management Center and enter the API key. The plugin encrypts it before persistence.
 
+### Remote login
+
+When CLIProxyAPI runs behind a reverse proxy, add the public HTTPS origin to the plugin entry:
+
+```yaml
+plugins:
+  configs:
+    openrouter:
+      enabled: true
+      public-base-url: "https://ai-proxy.example.com"
+```
+
+The host currently supplies a loopback URL to plugin login flows. `public-base-url` replaces only that browser-facing origin. It must be an absolute HTTPS origin without credentials, a path, query parameters, or a fragment. When omitted, the plugin keeps the host-provided URL for local installations.
+
 Each credential is assigned priority `-1`, allowing credentials with the default priority `0` to remain preferred for shared model IDs. Credentials at the same priority follow the global CLIProxyAPI routing strategy.
 
 ## Model catalog
