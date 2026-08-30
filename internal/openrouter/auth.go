@@ -34,6 +34,10 @@ type keyResponse struct {
 }
 
 func (s *Service) StartLogin(_ context.Context, req pluginapi.AuthLoginStartRequest) (pluginapi.AuthLoginStartResponse, error) {
+	loginBaseURL, err := s.loginBaseURL(req.BaseURL)
+	if err != nil {
+		return pluginapi.AuthLoginStartResponse{}, fmt.Errorf("resolve login base URL: %w", err)
+	}
 	stateBytes := make([]byte, 24)
 	if _, err := rand.Read(stateBytes); err != nil {
 		return pluginapi.AuthLoginStartResponse{}, err
@@ -51,7 +55,7 @@ func (s *Service) StartLogin(_ context.Context, req pluginapi.AuthLoginStartRequ
 	s.mu.Lock()
 	s.logins[state] = &loginFlow{PrivateKey: privateKey, PublicKey: base64.StdEncoding.EncodeToString(publicDER), ExpiresAt: expiresAt}
 	s.mu.Unlock()
-	base, err := url.Parse(req.BaseURL)
+	base, err := url.Parse(loginBaseURL)
 	if err != nil {
 		return pluginapi.AuthLoginStartResponse{}, fmt.Errorf("parse login base URL: %w", err)
 	}
